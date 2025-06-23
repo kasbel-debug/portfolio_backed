@@ -19,8 +19,8 @@ mongoose.connect(MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 })
-.then(() => console.log('Connected to MongoDB'))
-.catch((error) => console.error('MongoDB connection error:', error));
+    .then(() => console.log('Connected to MongoDB'))
+    .catch((error) => console.error('MongoDB connection error:', error));
 
 // Contact Schema
 const contactSchema = new mongoose.Schema({
@@ -119,14 +119,33 @@ app.get('/api/contacts', async (req, res) => {
         const contacts = await Contact.find()
             .sort({ createdAt: -1 })
             .select('-__v');
-
+    }
+    catch (error) {
+        console.error('Error fetching education:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching education'
+        });
+    }
         res.json({
             success: true,
             count: contacts.length,
             data: contacts
         });
+});
 
-    } catch (error) {
+        // FETCH - Retrieve all education
+        app.get('/api/education', async (req, res) => {
+            try {
+                const education = await Education.find();
+                res.json({
+                    success: true, data: education,
+                });
+            }
+        
+
+
+     catch (error) {
         console.error('Error fetching contacts:', error);
         res.status(500).json({
             success: false,
@@ -139,7 +158,7 @@ app.get('/api/contacts', async (req, res) => {
 app.get('/api/contact/:id', async (req, res) => {
     try {
         const contact = await Contact.findById(req.params.id);
-        
+
         if (!contact) {
             return res.status(404).json({
                 success: false,
@@ -165,7 +184,7 @@ app.get('/api/contact/:id', async (req, res) => {
 app.delete('/api/contact/:id', async (req, res) => {
     try {
         const contact = await Contact.findByIdAndDelete(req.params.id);
-        
+
         if (!contact) {
             return res.status(404).json({
                 success: false,
@@ -201,5 +220,3 @@ app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/api/health`);
 });
-
-//kasturi 134e32
