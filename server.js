@@ -3,24 +3,63 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 require('dotenv').config();
+const { MongoClient } = require('mongodb');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors(
+    {
+        origin: '*', // Allow all origins for development; restrict in production
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        allowedHeaders: ['Content-Type', 'Authorization']
+    }
+));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // MongoDB Connection
+let db;
 const MONGODB_URI = process.env.MONGODB_URI;
-
-mongoose.connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
+console.log('Connecting to MongoDB:', MONGODB_URI);
+mongoose.connect(MONGODB_URI)
     .then(() => console.log('Connected to MongoDB'))
     .catch((error) => console.error('MongoDB connection error:', error));
+
+
+async function connectToDatabase() {
+    try {
+        const client = await MongoClient.connect(MONGODB_URI);
+        db = client.db('test'); // or your actual database name
+        console.log('Connected to MongoDB Atlas');
+    } catch (error) {
+        console.error('MongoDB Atlas connection error:', error);
+        process.exit(1);
+    }
+}
+
+connectToDatabase();
+
+app.get('/api/education', async (req, res) => {
+    console.log('Fetching education data...');
+    if (!db) {
+        console.error('Database not connected');
+        return res.status(500).json({ error: 'Database not connected' });
+    }
+    try {
+        console.log('Fetching education from database...');
+        const education = await db.collection('educations').find({}).toArray();
+        if (!education || education.length === 0) {
+            console.log('No education data found');
+            return res.status(404).json({ error: 'No education data found' });
+        }
+        res.json(education);
+    } catch (error) {
+        console.error('Error fetching education data:', error);
+        res.status(500).json({ error: 'Failed to fetch education data' });
+    }
+});
 
 // Contact Schema
 const contactSchema = new mongoose.Schema({
@@ -139,7 +178,8 @@ app.get('/api/contacts', async (req, res) => {
             try {
                 const education = await Education.find();
                 res.json({
-                    success: true, data: education,
+                    success: true,
+                    data: education,
                 });
             }
         
