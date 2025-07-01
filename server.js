@@ -10,6 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+app.use(cors()); // Enable CORS for all routes
 app.use(cors({
     origin: '*', // Allow all origins for development; restrict in production
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -22,6 +23,17 @@ app.use(bodyParser.urlencoded({ extended: true }));
 let db;
 const MONGODB_URI = process.env.MONGODB_URI;
 console.log('Connecting to MongoDB:', MONGODB_URI);
+mongoose.connect(MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    })
+    
+.then(() => {
+    console.log('Connected to MongoDB with Mongoose');
+}).catch((error) => {
+    console.error('MongoDB connection error:', error);
+    process.exit(1); // Exit if connection fails
+});
 
 // Mongoose connection
 mongoose.connect(MONGODB_URI)
@@ -230,41 +242,53 @@ app.get('/api/contacts', async (req, res) => {
 // GET - Retrieve education data (using native MongoDB driver)
 app.get('/api/education', async (req, res) => {
     console.log('Fetching education data...');
-    if (!db) {
+     if (!db) {
         console.error('Database not connected');
         return res.status(500).json({ error: 'Database not connected' });
     }
     try {
         console.log('Fetching education from database...');
-        const education = await db.collection('educations').find({}).toArray();
-        if (!education || education.length === 0) {
-            console.log('No education data found');
-            return res.status(404).json({ error: 'No education data found' });
+        
+        // First, let's check what collections exist
+        const collections = await db.listCollections().toArray();
+        console.log('Available collections:', collections.map(col => col.name));
+        
+        // Try different possible collection names
+        let education = [];
+        const possibleNames = ['educations', 'education', 'Education'];
+        
+        for (const collectionName of possibleNames) {
+            console.log(`Trying collection: ${collectionName}`);
+            const result = await db.collection(collectionName).find({}).toArray();
+            if (result && result.length > 0) {
+                education = result;
+                console.log(`Found ${result.length} education records in ${collectionName}`);
+                break;
+            }
         }
+        
+        if (!education || education.length === 0) {
+            console.log('No education data found in any collection');
+            
+            // Let's also check the actual database name
+            const admin = db.admin();
+            const dbInfo = await admin.listDatabases();
+            console.log('Available databases:', dbInfo.databases.map(db => db.name));
+            
+            return res.status(404).json({ 
+                error: 'No education data found',
+                availableCollections: collections.map(col => col.name),
+                availableDatabases: dbInfo.databases.map(db => db.name)
+            });
+        }
+        
         res.json({
             success: true,
             data: education
         });
     } catch (error) {
         console.error('Error fetching education data:', error);
-        res.status(500).json({ error: 'Failed to fetch education data' });
-    }
-});
-
-// Alternative: GET - Retrieve education data (using Mongoose if you prefer)
-app.get('/api/education-mongoose', async (req, res) => {
-    try {
-        const education = await Education.find();
-        res.json({
-            success: true,
-            data: education,
-        });
-    } catch (error) {
-        console.error('Error fetching education:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching education'
-        });
+        res.status(500).json({ error: 'Failed to fetch education data', details: error.message });
     }
 });
 
