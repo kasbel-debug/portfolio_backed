@@ -3,19 +3,18 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 require('dotenv').config();
+const nodemailer = require('nodemailer');
 const { MongoClient } = require('mongodb');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors(
-    {
-        origin: '*', // Allow all origins for development; restrict in production
-        methods: ['GET', 'POST', 'PUT', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization']
-    }
-));
+app.use(cors({
+    origin: '*', // Allow all origins for development; restrict in production
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -23,16 +22,18 @@ app.use(bodyParser.urlencoded({ extended: true }));
 let db;
 const MONGODB_URI = process.env.MONGODB_URI;
 console.log('Connecting to MongoDB:', MONGODB_URI);
+
+// Mongoose connection
 mongoose.connect(MONGODB_URI)
-    .then(() => console.log('Connected to MongoDB'))
+    .then(() => console.log('Connected to MongoDB with Mongoose'))
     .catch((error) => console.error('MongoDB connection error:', error));
 
-
+// Native MongoDB connection (if needed for direct queries)
 async function connectToDatabase() {
     try {
         const client = await MongoClient.connect(MONGODB_URI);
         db = client.db('test'); // or your actual database name
-        console.log('Connected to MongoDB Atlas');
+        console.log('Connected to MongoDB Atlas with native driver');
     } catch (error) {
         console.error('MongoDB Atlas connection error:', error);
         process.exit(1);
@@ -40,26 +41,6 @@ async function connectToDatabase() {
 }
 
 connectToDatabase();
-
-app.get('/api/education', async (req, res) => {
-    console.log('Fetching education data...');
-    if (!db) {
-        console.error('Database not connected');
-        return res.status(500).json({ error: 'Database not connected' });
-    }
-    try {
-        console.log('Fetching education from database...');
-        const education = await db.collection('educations').find({}).toArray();
-        if (!education || education.length === 0) {
-            console.log('No education data found');
-            return res.status(404).json({ error: 'No education data found' });
-        }
-        res.json(education);
-    } catch (error) {
-        console.error('Error fetching education data:', error);
-        res.status(500).json({ error: 'Failed to fetch education data' });
-    }
-});
 
 // Contact Schema
 const contactSchema = new mongoose.Schema({
@@ -95,8 +76,66 @@ const contactSchema = new mongoose.Schema({
 // Contact Model
 const Contact = mongoose.model('Contact', contactSchema);
 
+// Education Schema (if you're using Mongoose for education too)
+const educationSchema = new mongoose.Schema({
+    degree: String,
+    institution: String,
+    year: String,
+    description: String,
+    // Add other fields as needed
+});
+
+const Education = mongoose.model('Education', educationSchema);
+
+// Email transporter configuration
+console.log('Nodemailer config:', {
+    secure: true,
+    host: "smtp.gmail.com",
+    port: 465,
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS, // Hide password in logs
+    }
+});
+
+const transporter = nodemailer.createTransport({
+    secure: true,
+    host: "smtp.gmail.com",
+    port: 465,
+    auth: {
+        user: process.env.EMAIL_USER, // Better to use env variable
+        pass: process.env.EMAIL_PASS,  // Better to use env variable
+    }
+});
+
+// Function to send email
+async function sendMail(to, name, email, subject, message) {
+    try {
+        const mailOptions = {
+            from: process.env.EMAIL_USER || 'kasturibelan10@gmail.com',
+            to: to,
+            subject: subject,
+            text: `Name: ${name}\nEmail: ${email}\nMessage: ${message}`,
+            html: `
+                <h3>New Contact Form Submission</h3>
+                <p><strong>Name:</strong> ${name}</p>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Subject:</strong> ${subject}</p>
+                <p><strong>Message:</strong> ${message}</p>
+            `
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Email sent successfully:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('Error sending email:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 // Routes
-// POST - Save contact form data
+// POST - Save contact form data and send email
 app.post('/api/contact', async (req, res) => {
     try {
         const { name, email, subject, message } = req.body;
@@ -127,9 +166,23 @@ app.post('/api/contact', async (req, res) => {
             ipAddress: req.ip,
             userAgent: req.get('User-Agent')
         });
-
+        console.log('New contact data:', newContact);              
         // Save to database
         const savedContact = await newContact.save();
+
+        // Send email notification
+        const emailResult = await sendMail(
+            'kasturibelan10@gmail.com', // Your email where you want to receive notifications
+            name,
+            email,
+            subject,
+            message
+        );
+
+        if (!emailResult.success) {
+            console.error('Failed to send email notification:', emailResult.error);
+            // You might want to continue even if email fails
+        }
 
         res.status(201).json({
             success: true,
@@ -140,7 +193,8 @@ app.post('/api/contact', async (req, res) => {
                 email: savedContact.email,
                 subject: savedContact.subject,
                 createdAt: savedContact.createdAt
-            }
+            },
+            emailSent: emailResult.success
         });
 
     } catch (error) {
@@ -158,38 +212,58 @@ app.get('/api/contacts', async (req, res) => {
         const contacts = await Contact.find()
             .sort({ createdAt: -1 })
             .select('-__v');
-    }
-    catch (error) {
-        console.error('Error fetching education:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching education'
-        });
-    }
+
         res.json({
             success: true,
             count: contacts.length,
             data: contacts
         });
-});
-
-        // FETCH - Retrieve all education
-        app.get('/api/education', async (req, res) => {
-            try {
-                const education = await Education.find();
-                res.json({
-                    success: true,
-                    data: education,
-                });
-            }
-        
-
-
-     catch (error) {
+    } catch (error) {
         console.error('Error fetching contacts:', error);
         res.status(500).json({
             success: false,
             message: 'Error fetching contacts'
+        });
+    }
+});
+
+// GET - Retrieve education data (using native MongoDB driver)
+app.get('/api/education', async (req, res) => {
+    console.log('Fetching education data...');
+    if (!db) {
+        console.error('Database not connected');
+        return res.status(500).json({ error: 'Database not connected' });
+    }
+    try {
+        console.log('Fetching education from database...');
+        const education = await db.collection('educations').find({}).toArray();
+        if (!education || education.length === 0) {
+            console.log('No education data found');
+            return res.status(404).json({ error: 'No education data found' });
+        }
+        res.json({
+            success: true,
+            data: education
+        });
+    } catch (error) {
+        console.error('Error fetching education data:', error);
+        res.status(500).json({ error: 'Failed to fetch education data' });
+    }
+});
+
+// Alternative: GET - Retrieve education data (using Mongoose if you prefer)
+app.get('/api/education-mongoose', async (req, res) => {
+    try {
+        const education = await Education.find();
+        res.json({
+            success: true,
+            data: education,
+        });
+    } catch (error) {
+        console.error('Error fetching education:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching education'
         });
     }
 });
